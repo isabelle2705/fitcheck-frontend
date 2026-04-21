@@ -1,4 +1,4 @@
-const BASE = 'http://localhost:3000';
+const BASE = process.env.EXPO_PUBLIC_API_URL ?? 'https://fitcheck-backend-production.up.railway.app';
 
 export interface UploadResponse {
   asset_id: string;
