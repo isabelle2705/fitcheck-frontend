@@ -2,5 +2,8 @@
   "buildCommand": "npx expo export --platform web",
   "outputDirectory": "dist",
   "installCommand": "npm install",
-  "framework": null
+  "framework": null,
+  "env": {
+    "EXPO_PUBLIC_API_URL": "https://fitcheck-backend-production.up.railway.app"
+  }
 }
