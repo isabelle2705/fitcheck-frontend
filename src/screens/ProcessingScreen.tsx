@@ -6,22 +6,17 @@ import {
   TouchableOpacity,
   StyleSheet,
   SafeAreaView,
+  Animated,
+  Easing,
 } from 'react-native';
-import StageIndicator from '../components/StageIndicator';
-import StatusCard from '../components/StatusCard';
+import { WS_BASE } from '../services/api';
 
-type Stage =
-  | 'validator'
-  | 'segmenter'
-  | 'pose'
-  | 'warp'
-  | 'composite'
-  | 'quality';
-
-interface StageInfo {
-  label: string;
-  eta: string | null;
-}
+const STAGES = [
+  'Analyzing your photo…',
+  'Fitting garments to your body…',
+  'Generating studio look…',
+  'Adding finishing touches…',
+];
 
 export default function ProcessingScreen() {
   const router = useRouter();
@@ -30,101 +25,98 @@ export default function ProcessingScreen() {
     job_id: string;
   }>();
 
-  const [currentStage, setCurrentStage] = useState<Stage>('validator');
-  const [stages, setStages] = useState<Record<Stage, StageInfo>>({
-    validator: { label: 'Validating', eta: null },
-    segmenter: { label: 'Segmenting', eta: null },
-    pose: { label: 'Analyzing Pose', eta: null },
-    warp: { label: 'Warping Garment', eta: null },
-    composite: { label: 'Compositing', eta: null },
-    quality: { label: 'Quality Check', eta: null },
-  });
-  const [completed, setCompleted] = useState<Stage[]>([]);
+  const [stageIndex, setStageIndex] = useState(0);
   const [error, setError] = useState<string | null>(null);
   const wsRef = useRef<WebSocket | null>(null);
+  const spinAnim = useRef(new Animated.Value(0)).current;
 
+  // Spinning animation
+  useEffect(() => {
+    Animated.loop(
+      Animated.timing(spinAnim, {
+        toValue: 1,
+        duration: 2000,
+        easing: Easing.linear,
+        useNativeDriver: true,
+      })
+    ).start();
+  }, []);
+
+  // Cycle through stage labels every few seconds as visual feedback
+  useEffect(() => {
+    const interval = setInterval(() => {
+      setStageIndex((prev) => (prev + 1) % STAGES.length);
+    }, 4000);
+    return () => clearInterval(interval);
+  }, []);
+
+  // WebSocket connection
   useEffect(() => {
     if (!session_id) return;
 
-    const ws = new WebSocket(`ws://localhost:3000/ws/${session_id}`);
+    const wsUrl = `${WS_BASE}/ws/${session_id}`;
+    console.log('[ws] connecting to', wsUrl);
+    const ws = new WebSocket(wsUrl);
     wsRef.current = ws;
 
-    ws.onopen = () => {
-      console.log('WebSocket connected');
-    };
+    ws.onopen = () => console.log('[ws] connected');
 
     ws.onmessage = (event) => {
       try {
         const data = JSON.parse(event.data);
-        handleWebSocketMessage(data);
+        console.log('[ws] message:', data);
+
+        switch (data.type) {
+          case 'stage_update':
+            // Map higgsfield stage to our UI stage index
+            if (data.stage === 'generating') setStageIndex(2);
+            break;
+
+          case 'job_complete':
+            router.replace({
+              pathname: '/result',
+              params: {
+                job_id: job_id ?? '',
+                composite_url: data.composite_url ?? '',
+              },
+            });
+            break;
+
+          case 'job_failed':
+            setError(data.error ?? 'Generation failed. Please try again.');
+            break;
+        }
       } catch (err) {
-        console.error('Failed to parse WebSocket message:', err);
+        console.error('[ws] parse error:', err);
       }
     };
 
-    ws.onerror = () => {
-      setError('Connection error. Please try again.');
+    ws.onerror = (e) => {
+      console.error('[ws] error:', e);
+      // Don't set error immediately — might reconnect
     };
 
-    ws.onclose = () => {
-      console.log('WebSocket closed');
-    };
+    ws.onclose = () => console.log('[ws] closed');
 
-    return () => {
-      ws.close();
-    };
+    return () => ws.close();
   }, [session_id]);
 
-  const handleWebSocketMessage = (data: any) => {
-    switch (data.type) {
-      case 'stage_update':
-        setCurrentStage(data.stage as Stage);
-        setStages((prev) => ({
-          ...prev,
-          [data.stage]: {
-            ...prev[data.stage as Stage],
-            label: data.label || prev[data.stage as Stage].label,
-            eta: data.eta || null,
-          },
-        }));
-        break;
-
-      case 'stage_complete':
-        setCompleted((prev) => [...prev, data.stage as Stage]);
-        break;
-
-      case 'job_complete':
-        router.replace({
-          pathname: '/result',
-          params: {
-            job_id,
-            result_url: data.result_url || '',
-            quality_score: String(data.quality_score || 0),
-          },
-        });
-        break;
-
-      case 'job_failed':
-        setError(data.error || 'Processing failed. Please try again.');
-        break;
-    }
-  };
-
-  const handleRetry = () => {
-    router.replace('/garment');
-  };
+  const spin = spinAnim.interpolate({
+    inputRange: [0, 1],
+    outputRange: ['0deg', '360deg'],
+  });
 
   if (error) {
     return (
       <SafeAreaView style={styles.container}>
-        <View style={styles.errorContainer}>
+        <View style={styles.centeredContent}>
           <Text style={styles.errorEmoji}>⚠️</Text>
           <Text style={styles.errorTitle}>Something went wrong</Text>
           <Text style={styles.errorMessage}>{error}</Text>
           <TouchableOpacity
             style={styles.retryButton}
             activeOpacity={0.8}
-            onPress={handleRetry}
+            onPress={() => router.replace('/garment')}
           >
             <Text style={styles.retryButtonText}>Try Again</Text>
           </TouchableOpacity>
@@ -135,85 +127,63 @@ export default function ProcessingScreen() {
 
   return (
     <SafeAreaView style={styles.container}>
-      <View style={styles.content}>
-        <Text style={styles.title}>Processing Your Try-On</Text>
-        <Text style={styles.subtitle}>This usually takes 10-20 seconds</Text>
+      <View style={styles.centeredContent}>
+        {/* Spinner */}
+        <Animated.Text style={[styles.spinner, { transform: [{ rotate: spin }] }]}>
+          ✨
+        </Animated.Text>
 
-        <StageIndicator
-          currentStage={currentStage}
-          completedStages={completed}
-        />
+        <Text style={styles.title}>Creating Your Look</Text>
+        <Text style={styles.subtitle}>This takes about 30–60 seconds</Text>
 
-        <View style={styles.statusContainer}>
-          <StatusCard
-            stage={stages[currentStage].label}
-            progress={`Stage ${completed.length + 1} of 6`}
-            eta={stages[currentStage].eta}
-            isActive={!completed.includes(currentStage) && currentStage !== 'quality'}
-          />
+        <View style={styles.stageCard}>
+          <Text style={styles.stageText}>{STAGES[stageIndex]}</Text>
         </View>
+
+        <Text style={styles.hint}>
+          We're generating a professional studio photo just for you
+        </Text>
       </View>
     </SafeAreaView>
   );
 }
 
 const styles = StyleSheet.create({
-  container: {
-    flex: 1,
-    backgroundColor: '#ffffff',
-  },
-  content: {
-    flex: 1,
-    paddingHorizontal: 24,
-    paddingTop: 48,
-  },
-  title: {
-    fontSize: 28,
-    fontWeight: '700',
-    color: '#1a1a1a',
-    textAlign: 'center',
-  },
-  subtitle: {
-    fontSize: 16,
-    color: '#888888',
-    textAlign: 'center',
-    marginTop: 8,
-    marginBottom: 48,
-  },
-  statusContainer: {
-    marginTop: 40,
-  },
-  errorContainer: {
+  container: { flex: 1, backgroundColor: '#ffffff' },
+  centeredContent: {
     flex: 1,
     justifyContent: 'center',
     alignItems: 'center',
     paddingHorizontal: 32,
+    gap: 16,
   },
-  errorEmoji: {
-    fontSize: 48,
-    marginBottom: 16,
+  spinner: { fontSize: 56, marginBottom: 8 },
+  title: { fontSize: 26, fontWeight: '700', color: '#1a1a1a', textAlign: 'center' },
+  subtitle: { fontSize: 15, color: '#888888', textAlign: 'center' },
+  stageCard: {
+    marginTop: 8,
+    backgroundColor: '#f5f5f5',
+    paddingVertical: 14,
+    paddingHorizontal: 28,
+    borderRadius: 16,
   },
-  errorTitle: {
-    fontSize: 22,
-    fontWeight: '700',
-    color: '#1a1a1a',
-    marginBottom: 12,
-  },
-  errorMessage: {
-    fontSize: 16,
-    color: '#666666',
+  stageText: { fontSize: 15, fontWeight: '500', color: '#333333', textAlign: 'center' },
+  hint: {
+    fontSize: 13,
+    color: '#aaaaaa',
     textAlign: 'center',
-    marginBottom: 32,
+    marginTop: 8,
+    lineHeight: 18,
   },
+  errorEmoji: { fontSize: 48, marginBottom: 8 },
+  errorTitle: { fontSize: 22, fontWeight: '700', color: '#1a1a1a' },
+  errorMessage: { fontSize: 15, color: '#666666', textAlign: 'center', lineHeight: 22 },
   retryButton: {
+    marginTop: 16,
     backgroundColor: '#1a1a1a',
     paddingVertical: 16,
     paddingHorizontal: 48,
     borderRadius: 30,
   },
-  retryButtonText: {
-    color: '#ffffff',
-    fontSize: 16,
-    fontWeight: '600',
-  },
+  retryButtonText: { color: '#ffffff', fontSize: 16, fontWeight: '600' },
 });
