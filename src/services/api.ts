@@ -10,7 +10,7 @@ export interface UploadResponse {
 }
 
 export interface CreateUserResponse {
-  userId: string;
+  id: string;
   points: number;
 }
 

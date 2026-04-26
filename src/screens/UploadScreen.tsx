@@ -54,7 +54,7 @@ export default function UploadScreen() {
 
       // 2. Create user account
       setStatusText('Creating your profile…');
-      const { userId, points } = await createUser();
+      const { id: userId, points } = await createUser();
       setUser(userId, points);
 
       // 3. Create Soul ID (Higgsfield character from photo)
