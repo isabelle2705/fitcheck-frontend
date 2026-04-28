@@ -62,10 +62,21 @@ export const createSoulId = (
 
 export const uploadImage = async (uri: string): Promise<UploadResponse> => {
   const formData = new FormData();
-  const filename = uri.split('/').pop() ?? 'photo.jpg';
-  const match = /\.(\w+)$/.exec(filename);
-  const type = match ? `image/${match[1]}` : 'image/jpeg';
-  formData.append('file', { uri, name: filename, type } as any);
+  const filename = 'photo.jpg';
+
+  // On web, expo-image-picker returns a blob: or data: URL.
+  // We must fetch it into a Blob and append that — the React Native
+  // { uri, name, type } shorthand doesn't work in the browser.
+  if (uri.startsWith('blob:') || uri.startsWith('data:')) {
+    const blobRes = await fetch(uri);
+    const blob = await blobRes.blob();
+    formData.append('file', blob, filename);
+  } else {
+    // React Native native path
+    const match = /\.(\w+)$/.exec(uri.split('/').pop() ?? '');
+    const type = match ? `image/${match[1]}` : 'image/jpeg';
+    formData.append('file', { uri, name: filename, type } as any);
+  }
 
   const res = await fetch(`${BASE}/upload`, {
     method: 'POST',
