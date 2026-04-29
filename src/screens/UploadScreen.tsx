@@ -9,6 +9,7 @@ import {
   Alert,
   ActivityIndicator,
   Image,
+  Platform,
 } from 'react-native';
 import * as ImagePicker from 'expo-image-picker';
 import { uploadImage, createUser, createSoulId } from '../services/api';
@@ -31,8 +32,7 @@ export default function UploadScreen() {
 
     const result = await ImagePicker.launchImageLibraryAsync({
       mediaTypes: ['images'],
-      allowsEditing: true,
-      aspect: [2, 3],
+      allowsEditing: false,
       quality: 0.85,
     });
 
@@ -42,30 +42,37 @@ export default function UploadScreen() {
     }
   };
 
+  const showError = (msg: string) => {
+    setError(msg);
+    // On web the error might be off-screen — also show a browser alert
+    if (Platform.OS === 'web') {
+      Alert.alert('Error', msg);
+    }
+  };
+
   const handleNext = async () => {
-    if (!imageUri) return;
+    if (!imageUri) {
+      showError('Please select a photo first.');
+      return;
+    }
     setUploading(true);
     setError(null);
 
     try {
-      // 1. Upload photo to R2
       setStatusText('Uploading your photo…');
       const { url: photoUrl } = await uploadImage(imageUri);
 
-      // 2. Create user account
       setStatusText('Creating your profile…');
       const { id: userId, points } = await createUser();
       setUser(userId, points);
 
-      // 3. Create Soul ID (Higgsfield character from photo)
-      setStatusText('Building your AI model…');
+      setStatusText('Building your AI model… (~30s)');
       const { soulId } = await createSoulId(userId, [photoUrl]);
       setSoulId(soulId);
 
-      // 4. Navigate to garment picker
       router.push('/garment');
     } catch (err: any) {
-      setError(err.message ?? 'Something went wrong. Please try again.');
+      showError(err.message ?? 'Something went wrong. Please try again.');
     } finally {
       setUploading(false);
       setStatusText('');
@@ -91,6 +98,20 @@ export default function UploadScreen() {
           Full body shot works best — plain background, good lighting
         </Text>
 
+        {/* Error shown ABOVE the picker so it's always visible */}
+        {error && (
+          <View style={styles.errorContainer}>
+            <Text style={styles.errorText}>⚠️  {error}</Text>
+          </View>
+        )}
+
+        {uploading && (
+          <View style={styles.statusContainer}>
+            <ActivityIndicator color="#1a1a1a" />
+            <Text style={styles.statusText}>{statusText}</Text>
+          </View>
+        )}
+
         <TouchableOpacity
           style={styles.pickerButton}
           activeOpacity={0.7}
@@ -113,19 +134,6 @@ export default function UploadScreen() {
             <Text style={styles.changeButtonText}>Change Photo</Text>
           </TouchableOpacity>
         )}
-
-        {uploading && (
-          <View style={styles.statusContainer}>
-            <ActivityIndicator color="#1a1a1a" />
-            <Text style={styles.statusText}>{statusText}</Text>
-          </View>
-        )}
-
-        {error && (
-          <View style={styles.errorContainer}>
-            <Text style={styles.errorText}>{error}</Text>
-          </View>
-        )}
       </View>
 
       <View style={styles.footer}>
@@ -139,7 +147,10 @@ export default function UploadScreen() {
           disabled={!imageUri || uploading}
         >
           {uploading ? (
-            <ActivityIndicator color="#ffffff" />
+            <View style={styles.nextButtonInner}>
+              <ActivityIndicator color="#ffffff" />
+              <Text style={styles.nextButtonText}>{statusText || 'Processing…'}</Text>
+            </View>
           ) : (
             <Text style={styles.nextButtonText}>Next →</Text>
           )}
@@ -162,12 +173,31 @@ const styles = StyleSheet.create({
   backButton: { width: 44, height: 44, justifyContent: 'center', alignItems: 'center' },
   backText: { fontSize: 24, color: '#1a1a1a' },
   stepText: { fontSize: 14, color: '#888888', marginLeft: 12 },
-  content: { flex: 1, paddingHorizontal: 24, paddingTop: 32 },
+  content: { flex: 1, paddingHorizontal: 24, paddingTop: 24 },
   title: { fontSize: 28, fontWeight: '700', color: '#1a1a1a', marginBottom: 10 },
-  subtitle: { fontSize: 15, color: '#666666', lineHeight: 22, marginBottom: 28 },
+  subtitle: { fontSize: 15, color: '#666666', lineHeight: 22, marginBottom: 20 },
+  errorContainer: {
+    marginBottom: 16,
+    padding: 14,
+    backgroundColor: '#fff0f0',
+    borderRadius: 12,
+    borderWidth: 1,
+    borderColor: '#ffcccc',
+  },
+  errorText: { fontSize: 14, color: '#d32f2f' },
+  statusContainer: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 10,
+    marginBottom: 16,
+    padding: 14,
+    backgroundColor: '#f5f5f5',
+    borderRadius: 12,
+  },
+  statusText: { fontSize: 14, color: '#555555', flex: 1 },
   pickerButton: {
     width: '100%',
-    aspectRatio: 2 / 3,
+    height: 320,   // fixed height — no more giant box on desktop
     backgroundColor: '#f8f8f8',
     borderRadius: 20,
     borderWidth: 2,
@@ -182,10 +212,6 @@ const styles = StyleSheet.create({
   pickerHint: { fontSize: 13, color: '#aaaaaa' },
   changeButton: { marginTop: 14, alignSelf: 'center', paddingVertical: 10, paddingHorizontal: 24 },
   changeButtonText: { fontSize: 14, fontWeight: '600', color: '#555555' },
-  statusContainer: { flexDirection: 'row', alignItems: 'center', gap: 10, marginTop: 20 },
-  statusText: { fontSize: 14, color: '#555555' },
-  errorContainer: { marginTop: 20, padding: 16, backgroundColor: '#fff0f0', borderRadius: 12 },
-  errorText: { fontSize: 14, color: '#d32f2f', textAlign: 'center' },
   footer: { padding: 24, paddingBottom: 40 },
   nextButton: {
     backgroundColor: '#1a1a1a',
@@ -193,6 +219,7 @@ const styles = StyleSheet.create({
     borderRadius: 30,
     alignItems: 'center',
   },
+  nextButtonInner: { flexDirection: 'row', alignItems: 'center', gap: 10 },
   nextButtonDisabled: { backgroundColor: '#cccccc' },
   nextButtonText: { color: '#ffffff', fontSize: 18, fontWeight: '600' },
 });
