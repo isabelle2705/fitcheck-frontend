@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useRef, useState, useCallback } from 'react';
 import { useRouter, useLocalSearchParams } from 'expo-router';
 import {
   View,
@@ -9,7 +9,7 @@ import {
   Animated,
   Easing,
 } from 'react-native';
-import { WS_BASE } from '../services/api';
+import { WS_BASE, getResult } from '../services/api';
 
 const STAGES = [
   'Analyzing your photo…',
@@ -17,6 +17,8 @@ const STAGES = [
   'Generating studio look…',
   'Adding finishing touches…',
 ];
+
+const POLL_INTERVAL_MS = 3000;
 
 export default function ProcessingScreen() {
   const router = useRouter();
@@ -28,9 +30,31 @@ export default function ProcessingScreen() {
   const [stageIndex, setStageIndex] = useState(0);
   const [error, setError] = useState<string | null>(null);
   const wsRef = useRef<WebSocket | null>(null);
+  const doneRef = useRef(false);          // prevents double-navigation
   const spinAnim = useRef(new Animated.Value(0)).current;
 
-  // Spinning animation
+  // ── helpers ────────────────────────────────────────────────────────────────
+
+  const navigateToResult = useCallback(
+    (compositeUrl: string) => {
+      if (doneRef.current) return;
+      doneRef.current = true;
+      router.replace({
+        pathname: '/result',
+        params: { job_id: job_id ?? '', composite_url: compositeUrl },
+      });
+    },
+    [job_id, router]
+  );
+
+  const handleFailure = useCallback((msg: string) => {
+    if (doneRef.current) return;
+    doneRef.current = true;
+    setError(msg);
+  }, []);
+
+  // ── spinning animation ─────────────────────────────────────────────────────
+
   useEffect(() => {
     Animated.loop(
       Animated.timing(spinAnim, {
@@ -42,7 +66,8 @@ export default function ProcessingScreen() {
     ).start();
   }, []);
 
-  // Cycle through stage labels every few seconds as visual feedback
+  // ── cycle stage labels ─────────────────────────────────────────────────────
+
   useEffect(() => {
     const interval = setInterval(() => {
       setStageIndex((prev) => (prev + 1) % STAGES.length);
@@ -50,40 +75,39 @@ export default function ProcessingScreen() {
     return () => clearInterval(interval);
   }, []);
 
-  // WebSocket connection
+  // ── WebSocket (primary) ────────────────────────────────────────────────────
+
   useEffect(() => {
     if (!session_id) return;
 
     const wsUrl = `${WS_BASE}/ws/${session_id}`;
     console.log('[ws] connecting to', wsUrl);
-    const ws = new WebSocket(wsUrl);
+
+    let ws: WebSocket;
+    try {
+      ws = new WebSocket(wsUrl);
+    } catch (e) {
+      console.warn('[ws] could not create WebSocket:', e);
+      return;
+    }
     wsRef.current = ws;
 
     ws.onopen = () => console.log('[ws] connected');
 
     ws.onmessage = (event) => {
       try {
-        const data = JSON.parse(event.data);
+        const data = JSON.parse(event.data as string);
         console.log('[ws] message:', data);
 
         switch (data.type) {
           case 'stage_update':
-            // Map higgsfield stage to our UI stage index
             if (data.stage === 'generating') setStageIndex(2);
             break;
-
           case 'job_complete':
-            router.replace({
-              pathname: '/result',
-              params: {
-                job_id: job_id ?? '',
-                composite_url: data.composite_url ?? '',
-              },
-            });
+            navigateToResult(data.composite_url ?? data.result_url ?? '');
             break;
-
           case 'job_failed':
-            setError(data.error ?? 'Generation failed. Please try again.');
+            handleFailure(data.error ?? 'Generation failed. Please try again.');
             break;
         }
       } catch (err) {
@@ -91,15 +115,47 @@ export default function ProcessingScreen() {
       }
     };
 
-    ws.onerror = (e) => {
-      console.error('[ws] error:', e);
-      // Don't set error immediately — might reconnect
-    };
-
+    ws.onerror = (e) => console.warn('[ws] error:', e);
     ws.onclose = () => console.log('[ws] closed');
 
     return () => ws.close();
-  }, [session_id]);
+  }, [session_id, navigateToResult, handleFailure]);
+
+  // ── HTTP polling fallback ──────────────────────────────────────────────────
+
+  useEffect(() => {
+    if (!job_id) return;
+
+    const poll = async () => {
+      if (doneRef.current) return;
+      try {
+        const res = await getResult(job_id);
+        console.log('[poll] result:', res.status);
+
+        if (res.status === 'done' && res.composite_url) {
+          navigateToResult(res.composite_url);
+        } else if (res.status === 'failed') {
+          const msg = res.error ?? res.issues?.[0] ?? 'Generation failed. Please try again.';
+          handleFailure(msg);
+        }
+        // 'processing' → keep polling
+      } catch (err: any) {
+        console.warn('[poll] error:', err.message);
+        // Network hiccup — keep polling
+      }
+    };
+
+    // First poll after a short delay (job needs a moment to start)
+    const timeout = setTimeout(poll, 2000);
+    const interval = setInterval(poll, POLL_INTERVAL_MS);
+
+    return () => {
+      clearTimeout(timeout);
+      clearInterval(interval);
+    };
+  }, [job_id, navigateToResult, handleFailure]);
+
+  // ── render ─────────────────────────────────────────────────────────────────
 
   const spin = spinAnim.interpolate({
     inputRange: [0, 1],
@@ -128,7 +184,6 @@ export default function ProcessingScreen() {
   return (
     <SafeAreaView style={styles.container}>
       <View style={styles.centeredContent}>
-        {/* Spinner */}
         <Animated.Text style={[styles.spinner, { transform: [{ rotate: spin }] }]}>
           ✨
         </Animated.Text>

@@ -25,10 +25,12 @@ export interface GenerateResponse {
 }
 
 export interface ResultResponse {
-  job_id: string;
-  status: 'processing' | 'completed' | 'failed';
-  result_url?: string;
-  quality_score?: number;
+  job_id?: string;
+  status: 'processing' | 'done' | 'failed' | string;
+  composite_url?: string;
+  result_url?: string;   // alias some callers use
+  score?: number;
+  issues?: string[];
   error?: string;
 }
 
