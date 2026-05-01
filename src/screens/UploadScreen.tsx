@@ -19,6 +19,7 @@ export default function UploadScreen() {
   const router = useRouter();
   const { setUser, setSoulId } = useAppStore();
   const [imageUri, setImageUri] = useState<string | null>(null);
+  const [imageFile, setImageFile] = useState<File | null>(null); // web File object
   const [uploading, setUploading] = useState(false);
   const [statusText, setStatusText] = useState('');
   const [error, setError] = useState<string | null>(null);
@@ -38,6 +39,8 @@ export default function UploadScreen() {
 
     if (!result.canceled && result.assets[0]) {
       setImageUri(result.assets[0].uri);
+      // On web, expo-image-picker exposes the raw File object — use it directly
+      setImageFile((result.assets[0] as any).file ?? null);
       setError(null);
     }
   };
@@ -60,7 +63,7 @@ export default function UploadScreen() {
 
     try {
       setStatusText('Uploading your photo…');
-      const { url: photoUrl } = await uploadImage(imageUri);
+      const { url: photoUrl } = await uploadImage(imageUri, imageFile ?? undefined);
 
       setStatusText('Creating your profile…');
       const { id: userId, points } = await createUser();

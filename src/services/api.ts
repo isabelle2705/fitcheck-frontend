@@ -60,14 +60,15 @@ export const createSoulId = (
 
 // ── Upload ───────────────────────────────────────────────────────────────────
 
-export const uploadImage = async (uri: string): Promise<UploadResponse> => {
+export const uploadImage = async (uri: string, file?: File): Promise<UploadResponse> => {
   const formData = new FormData();
   const filename = 'photo.jpg';
 
-  // On web, expo-image-picker returns a blob: or data: URL.
-  // We must fetch it into a Blob and append that — the React Native
-  // { uri, name, type } shorthand doesn't work in the browser.
-  if (uri.startsWith('blob:') || uri.startsWith('data:')) {
+  if (file) {
+    // Best path on web: use the raw File object directly — no blob URL fetch needed
+    formData.append('file', file, filename);
+  } else if (uri.startsWith('blob:') || uri.startsWith('data:')) {
+    // Fallback: fetch blob URL (may fail in some Safari versions)
     const blobRes = await fetch(uri);
     const blob = await blobRes.blob();
     formData.append('file', blob, filename);
@@ -83,7 +84,7 @@ export const uploadImage = async (uri: string): Promise<UploadResponse> => {
     body: formData,
   });
 
-  if (!res.ok) throw new Error(`Upload failed: ${res.statusText}`);
+  if (!res.ok) throw new Error(`Upload failed: ${res.status} ${res.statusText}`);
   return res.json();
 };
 
