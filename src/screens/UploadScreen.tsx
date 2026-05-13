@@ -25,6 +25,29 @@ export default function UploadScreen() {
   const [error, setError] = useState<string | null>(null);
 
   const pickImage = async () => {
+    // On web: use a native <input type="file"> for a guaranteed File object in all browsers
+    if (Platform.OS === 'web') {
+      await new Promise<void>((resolve) => {
+        const input = document.createElement('input');
+        input.type = 'file';
+        input.accept = 'image/*';
+        input.onchange = () => {
+          const file = input.files?.[0];
+          if (file) {
+            const objectUrl = URL.createObjectURL(file);
+            setImageUri(objectUrl);
+            setImageFile(file);
+            setError(null);
+          }
+          resolve();
+        };
+        input.addEventListener('cancel', () => resolve());
+        input.click();
+      });
+      return;
+    }
+
+    // Native (iOS / Android) path
     const { granted } = await ImagePicker.requestMediaLibraryPermissionsAsync();
     if (!granted) {
       Alert.alert('Permission Required', 'Please allow access to your photos.');
@@ -39,7 +62,6 @@ export default function UploadScreen() {
 
     if (!result.canceled && result.assets[0]) {
       setImageUri(result.assets[0].uri);
-      // On web, expo-image-picker exposes the raw File object — use it directly
       setImageFile((result.assets[0] as any).file ?? null);
       setError(null);
     }
